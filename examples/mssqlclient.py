@@ -41,6 +41,7 @@ if __name__ == '__main__':
      enable_xp_cmdshell         - you know what it means
      disable_xp_cmdshell        - you know what it means
      xp_cmdshell {cmd}          - executes cmd using xp_cmdshell
+     sp_start_job {cmd}         - executes cmd using the sql server agent (blind)
      ! {cmd}                    - executes a local shell cmd
      """ 
 
@@ -52,6 +53,21 @@ if __name__ == '__main__':
                 self.sql.sql_query("exec master..xp_cmdshell '%s'" % s)
                 self.sql.printReplies()
                 self.sql.colMeta[0]['TypeData'] = 80*2
+                self.sql.printRows()
+            except:
+                pass
+
+        def sp_start_job(self, s):
+            try:
+                self.sql.sql_query("DECLARE @job NVARCHAR(100);"
+                                   "SET @job='IdxDefrag'+CONVERT(NVARCHAR(36),NEWID());"
+                                   "EXEC msdb..sp_add_job @job_name=@job,@description='INDEXDEFRAG',"
+                                   "@owner_login_name='sa',@delete_level=3;"
+                                   "EXEC msdb..sp_add_jobstep @job_name=@job,@step_id=1,@step_name='Defragmentation',"
+                                   "@subsystem='CMDEXEC',@command='%s',@on_success_action=1;"
+                                   "EXEC msdb..sp_add_jobserver @job_name=@job;"
+                                   "EXEC msdb..sp_start_job @job_name=@job;" % s)
+                self.sql.printReplies()
                 self.sql.printRows()
             except:
                 pass
@@ -161,6 +177,9 @@ if __name__ == '__main__':
             res = ms_sql.login(options.db, username, password, domain, options.hashes, options.windows_auth)
         ms_sql.printReplies()
     except Exception, e:
+        if logging.getLogger().level == logging.DEBUG:
+            import traceback
+            traceback.print_exc()
         logging.error(str(e))
         res = False
     if res is True:

@@ -854,7 +854,7 @@ class DCERPC:
                     # No luck :(
                     exception = sessionErrorClass(error_code = error_code)
                 else:
-                    exception = sessionErrorClass(packet = response)
+                    exception = sessionErrorClass(packet = response, error_code = error_code)
             raise exception
         else:
             response =  respClass(answer, isNDR64 = isNDR64)
@@ -1548,7 +1548,7 @@ class DCERPCServer(Thread):
                         self.send(answer)
             except Exception:
                 #import traceback
-                #print traceback.print_exc()
+                #traceback.print_exc()
                 pass
             self._clientSock.close()
 

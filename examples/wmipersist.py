@@ -22,7 +22,7 @@
 #	objFile.Close
 #
 #
-# then excute this script this way, VBS will be triggered once
+# then execute this script this way, VBS will be triggered once
 # somebody opens calc.exe:
 #
 #  wmipersist.py domain.net/adminuser:mypwd@targetHost install -name ASEC 
@@ -230,7 +230,8 @@ if __name__ == '__main__':
         executer = WMIPERSISTENCE(username, password, domain, options)
         executer.run(address)
     except (Exception, KeyboardInterrupt), e:
-        #import traceback
-        #print traceback.print_exc()
+        if logging.getLogger().level == logging.DEBUG:
+            import traceback
+            traceback.print_exc()
         logging.error(e)
     sys.exit(0)

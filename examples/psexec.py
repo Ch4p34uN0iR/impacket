@@ -102,8 +102,7 @@ class PSEXEC:
                 pass
 
         if tries == 0:
-            logging.critical('Pipe not ready, aborting')
-            raise
+            raise Exception('Pipe not ready, aborting')
 
         fid = s.openFile(tid,pipe,accessMask, creationOption = 0x40, fileAttributes = 0x80)
 
@@ -115,8 +114,9 @@ class PSEXEC:
         try:
             dce.connect()
         except Exception, e:
-            #import traceback
-            #traceback.print_exc()
+            if logging.getLogger().level == logging.DEBUG:
+                import traceback
+                traceback.print_exc()
             logging.critical(str(e))
             sys.exit(1)
 
@@ -200,9 +200,11 @@ class PSEXEC:
 
         except SystemExit:
             raise
-        except:
-            #import traceback
-            #traceback.print_exc()
+        except Exception as e:
+            if logging.getLogger().level == logging.DEBUG:
+                import traceback
+                traceback.print_exc()
+            logging.debug(str(e))
             if unInstalled is False:
                 installService.uninstall()
                 if self.__copyFile is not None:
@@ -243,8 +245,9 @@ class Pipes(Thread):
             self.fid = self.server.openFile(self.tid,self.pipe,self.permissions, creationOption = 0x40, fileAttributes = 0x80)
             self.server.setTimeout(1000000)
         except:
-            import traceback
-            traceback.print_exc()
+            if logging.getLogger().level == logging.DEBUG:
+                import traceback
+                traceback.print_exc()
             logging.error("Something wen't wrong connecting the pipes(%s), try again" % self.__class__)
 
 
@@ -436,10 +439,10 @@ if __name__ == '__main__':
     group = parser.add_argument_group('connection')
 
     group.add_argument('-dc-ip', action='store', metavar="ip address",
-                       help='IP Address of the domain controller. If ommited it use the domain part (FQDN) specified in '
+                       help='IP Address of the domain controller. If omitted it will use the domain part (FQDN) specified in '
                             'the target parameter')
     group.add_argument('-target-ip', action='store', metavar="ip address",
-                       help='IP Address of the target machine. If ommited it will use whatever was specified as target. '
+                       help='IP Address of the target machine. If omitted it will use whatever was specified as target. '
                             'This is useful when target is the NetBIOS name and you cannot resolve it')
     group.add_argument('-port', choices=['139', '445'], nargs='?', default='445', metavar="destination port",
                        help='Destination port to connect to SMB Server')

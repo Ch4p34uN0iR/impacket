@@ -25,6 +25,7 @@ from binascii import unhexlify
 
 from pyasn1.codec.ber import encoder, decoder
 from pyasn1.error import SubstrateUnderrunError
+from pyasn1.type.univ import noValue
 
 from impacket import LOG
 from impacket.ldap.ldapasn1 import *
@@ -251,7 +252,7 @@ class LDAPConnection:
         # (Section 5.5.1)
         encryptedEncodedAuthenticator = cipher.encrypt(sessionKey, 11, encodedAuthenticator, None)
 
-        apReq['authenticator'] = None
+        apReq['authenticator'] = noValue
         apReq['authenticator']['etype'] = cipher.enctype
         apReq['authenticator']['cipher'] = encryptedEncodedAuthenticator
 
@@ -343,7 +344,7 @@ class LDAPConnection:
         return True
 
     def search(self, searchBase=None, scope=None, derefAliases=None, sizeLimit=0, timeLimit=0, typesOnly=False,
-               searchFilter='(objectClass=*)', attributes=None, searchControls=None):
+               searchFilter='(objectClass=*)', attributes=None, searchControls=None, perRecordCallback=None):
         if searchBase is None:
             searchBase = self._baseDN
         if scope is None:
@@ -381,7 +382,10 @@ class LDAPConnection:
                             answers=answers
                         )
                 else:
-                    answers.append(searchResult)
+                    if perRecordCallback is None:
+                        answers.append(searchResult)
+                    else:
+                        perRecordCallback(searchResult)
 
         return answers
 

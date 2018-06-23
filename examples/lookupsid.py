@@ -66,8 +66,9 @@ class LSALookupSid:
         try:
             self.__bruteForce(rpctransport, self.__maxRid)
         except Exception, e:
-            #import traceback
-            #print traceback.print_exc()
+            if logging.getLogger().level == logging.DEBUG:
+                import traceback
+                traceback.print_exc()
             logging.critical(str(e))
             raise
 
@@ -94,6 +95,8 @@ class LSALookupSid:
         else: # Get the target host SID
             resp = lsad.hLsarQueryInformationPolicy2(dce, policyHandle, lsad.POLICY_INFORMATION_CLASS.PolicyAccountDomainInformation)
             domainSid = resp['PolicyInformation']['PolicyAccountDomainInfo']['DomainSid'].formatCanonical()
+
+        logging.info('Domain SID is: %s' % domainSid)
 
         soFar = 0
         SIMULTANEOUS = 1000
@@ -150,7 +153,7 @@ if __name__ == '__main__':
     group = parser.add_argument_group('connection')
 
     group.add_argument('-target-ip', action='store', metavar="ip address", help='IP Address of the target machine. '
-                       'If ommited it will use whatever was specified as target. This is useful when target is the '
+                       'If omitted it will use whatever was specified as target. This is useful when target is the '
                        'NetBIOS name and you cannot resolve it')
     group.add_argument('-port', choices=['135', '139', '445'], nargs='?', default='445', metavar="destination port",
                        help='Destination port to connect to SMB Server')

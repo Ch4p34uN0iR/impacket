@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright (c) 2003-2016 CORE Security Technologies
 #
 # This software is provided under under a slightly modified version
@@ -45,7 +44,7 @@ except:
 # The rest it processed through the standard impacket logging mech.
 class DummyPrint:        
     def logMessage(self,message):
-        print message
+        print message,
 
 # MC-SQLR Constants and Structures
 SQLR_PORT           = 1434
@@ -296,6 +295,35 @@ class TDS_LOGIN(Structure):
             self['Password'] = ''
             self['Database'] = ''
             self['AtchDBFile'] = ''
+
+    def fromString(self, data):
+        Structure.fromString(self, data)
+        if self['HostNameLength'] > 0:
+            self['HostName'] = data[self['HostNameOffset']:][:self['HostNameLength']*2]
+
+        if self['UserNameLength'] > 0:
+            self['UserName'] = data[self['UserNameOffset']:][:self['UserNameLength']*2]
+
+        if self['PasswordLength'] > 0:
+            self['Password'] = data[self['PasswordOffset']:][:self['PasswordLength']*2]
+
+        if self['AppNameLength'] > 0:
+            self['AppName'] = data[self['AppNameOffset']:][:self['AppNameLength']*2]
+
+        if self['ServerNameLength'] > 0:
+            self['ServerName'] = data[self['ServerNameOffset']:][:self['ServerNameLength']*2]
+
+        if self['CltIntNameLength'] > 0:
+            self['CltIntName'] = data[self['CltIntNameOffset']:][:self['CltIntNameLength']*2]
+
+        if self['DatabaseLength'] > 0:
+            self['Database'] = data[self['DatabaseOffset']:][:self['DatabaseLength']*2]
+
+        if self['SSPILength'] > 0:
+            self['SSPI'] = data[self['SSPIOffset']:][:self['SSPILength']*2]
+
+        if self['AtchDBFileLength'] > 0:
+            self['AtchDBFile'] = data[self['AtchDBFileOffset']:][:self['AtchDBFileLength']*2]
 
     def __str__(self):
         index = 36+50
@@ -671,6 +699,7 @@ class MSSQL:
         from impacket.krb5 import constants
         from impacket.krb5.types import Principal, KerberosTime, Ticket
         from pyasn1.codec.der import decoder, encoder
+        from pyasn1.type.univ import noValue
         from impacket.krb5.ccache import CCache
         import os
         import datetime
@@ -688,20 +717,40 @@ class MSSQL:
                     LOG.debug('Domain retrieved from CCache: %s' % domain)
 
                 LOG.debug("Using Kerberos Cache: %s" % os.getenv('KRB5CCNAME'))
-                principal = 'MSSQLSvc/%s.%s:%d' % (self.server, domain, self.port)
+                principal = 'MSSQLSvc/%s.%s:%d@%s' % (self.server.split('.')[0], domain, self.port, domain.upper())
                 creds = ccache.getCredential(principal)
-                if creds is None:
-                    # Let's try for the TGT and go from there
-                    principal = 'krbtgt/%s@%s' % (domain.upper(),domain.upper())
-                    creds =  ccache.getCredential(principal)
-                    if creds is not None:
-                        TGT = creds.toTGT()
-                        LOG.debug('Using TGT from cache')
-                    else:
-                        LOG.debug("No valid credentials found in cache. ")
-                else:
+
+                if creds is not None:
                     TGS = creds.toTGS(principal)
                     LOG.debug('Using TGS from cache')
+                else:
+                    # search for the port's instance name instead (instance name based SPN)
+                    LOG.debug('Searching target\'s instances to look for port number %s' % self.port)
+                    instances = self.getInstances()
+                    instanceName = None
+                    for i in instances:
+                        try:
+                            if string.atoi(i['tcp']) == self.port:
+                                instanceName = i['InstanceName']
+                        except:
+                            pass
+
+                    if instanceName:
+                        principal = 'MSSQLSvc/%s.%s:%s@%s' % (self.server, domain, instanceName, domain.upper())
+                        creds = ccache.getCredential(principal)
+
+                    if creds is not None:
+                        TGS = creds.toTGS(principal)
+                        LOG.debug('Using TGS from cache')
+                    else:
+                        # Let's try for the TGT and go from there
+                        principal = 'krbtgt/%s@%s' % (domain.upper(),domain.upper())
+                        creds =  ccache.getCredential(principal)
+                        if creds is not None:
+                            TGT = creds.toTGT()
+                            LOG.debug('Using TGT from cache')
+                        else:
+                            LOG.debug("No valid credentials found in cache. ")
 
                 # retrieve user information from CCache file if needed
                 if username == '' and creds is not None:
@@ -750,7 +799,7 @@ class MSSQL:
                 #         FQDN is the fully qualified domain name of the server.
                 #         port is the TCP port number.
                 #         instancename is the name of the SQL Server instance.
-                serverName = Principal('MSSQLSvc/%s.%s:%d' % (self.server, domain, self.port), type=constants.PrincipalNameType.NT_SRV_INST.value)
+                serverName = Principal('MSSQLSvc/%s.%s:%d' % (self.server.split('.')[0], domain, self.port), type=constants.PrincipalNameType.NT_SRV_INST.value)
                 try:
                     tgs, cipher, oldSessionKey, sessionKey = getKerberosTGS(serverName, domain, kdcHost, tgt, cipher, sessionKey)
                 except KerberosError, e:
@@ -814,7 +863,7 @@ class MSSQL:
         # (Section 5.5.1)
         encryptedEncodedAuthenticator = cipher.encrypt(sessionKey, 11, encodedAuthenticator, None)
 
-        apReq['authenticator'] = None
+        apReq['authenticator'] = noValue
         apReq['authenticator']['etype'] = cipher.enctype
         apReq['authenticator']['cipher'] = encryptedEncodedAuthenticator
 
@@ -828,7 +877,7 @@ class MSSQL:
         # Send the NTLMSSP Negotiate or SQL Auth Packet
         self.sendTDS(TDS_LOGIN7, str(login))
 
-        # According to the spects, if encryption is not required, we must encrypt just
+        # According to the specs, if encryption is not required, we must encrypt just
         # the first Login packet :-o
         if resp['Encryption'] == TDS_ENCRYPT_OFF:
             self.tlsSocket = None
@@ -906,7 +955,7 @@ class MSSQL:
         # Send the NTLMSSP Negotiate or SQL Auth Packet
         self.sendTDS(TDS_LOGIN7, str(login))
 
-        # According to the spects, if encryption is not required, we must encrypt just 
+        # According to the specs, if encryption is not required, we must encrypt just 
         # the first Login packet :-o 
         if resp['Encryption'] == TDS_ENCRYPT_OFF:
             self.tlsSocket = None
@@ -976,10 +1025,12 @@ class MSSQL:
         if len(self.colMeta) == 0:
             return
         for col in self.colMeta:
-            self.__rowsPrinter.logMessage(col['Format'] % col['Name'] + self.COL_SEPARATOR + '\n')        
+            self.__rowsPrinter.logMessage(col['Format'] % col['Name'] + self.COL_SEPARATOR)
+        self.__rowsPrinter.logMessage('\n')
         for col in self.colMeta:
-            self.__rowsPrinter.logMessage('-'*col['Length'] + self.COL_SEPARATOR + '\n')
-        
+            self.__rowsPrinter.logMessage('-'*col['Length'] + self.COL_SEPARATOR)
+        self.__rowsPrinter.logMessage('\n')
+
 
     def printRows(self):
         if self.lastError is True:
@@ -988,7 +1039,8 @@ class MSSQL:
         self.printColumnsHeader()
         for row in self.rows:
             for col in self.colMeta:
-                self.__rowsPrinter.logMessage(col['Format'] % row[col['Name']] + self.COL_SEPARATOR)            
+                self.__rowsPrinter.logMessage(col['Format'] % row[col['Name']] + self.COL_SEPARATOR)
+            self.__rowsPrinter.logMessage('\n')
 
     def printReplies(self):
         for keys in self.replies.keys():
@@ -1300,11 +1352,9 @@ class MSSQL:
                 else:
                     value = 'NULL'
             elif _type == TDS_SSVARIANTTYPE:
-                LOG.critical("ParseRow: SQL Variant type not yet supported :(")
-                raise
+                raise Exception("ParseRow: SQL Variant type not yet supported :(")
             else:
-                LOG.critical("ParseROW: Unsupported data type: 0%x" % _type)
-                raise
+                raise Exception("ParseROW: Unsupported data type: 0%x" % _type)
 
             if tuplemode:
                 row.append(value)
@@ -1384,8 +1434,7 @@ class MSSQL:
                 typeData = struct.unpack('<L',data[:4])[0]
                 data = data[4:]
             else:
-                LOG.critical("Unsupported data type: 0x%x" % colType)
-                raise
+                raise Exception("Unsupported data type: 0x%x" % colType)
 
             # Collation exceptions:
             if (colType == TDS_NTEXTTYPE) |\

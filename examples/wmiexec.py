@@ -93,8 +93,9 @@ class WMIEXEC:
             else:
                 self.shell.cmdloop()
         except  (Exception, KeyboardInterrupt), e:
-            #import traceback
-            #traceback.print_exc()
+            if logging.getLogger().level == logging.DEBUG:
+                import traceback
+                traceback.print_exc()
             logging.error(str(e))
             if smbConnection is not None:
                 smbConnection.logoff()
@@ -148,6 +149,7 @@ class RemoteShell(cmd.Cmd):
                 logging.error(str(e))
 
     def do_get(self, src_path):
+
         try:
             import ntpath
             newPath = ntpath.normpath(ntpath.join(self.__pwd, src_path))
@@ -157,10 +159,14 @@ class RemoteShell(cmd.Cmd):
             logging.info("Downloading %s\\%s" % (drive, tail))
             self.__transferClient.getFile(drive[:-1]+'$', tail, fh.write)
             fh.close()
+
         except Exception, e:
             logging.error(str(e))
-            os.remove(filename)
-            pass
+
+            if os.path.exists(filename):
+                os.remove(filename)
+
+
 
     def do_put(self, s):
         try:
@@ -401,10 +407,11 @@ if __name__ == '__main__':
                            options.share, options.nooutput, options.k, options.dc_ip)
         executer.run(address)
     except KeyboardInterrupt, e:
-        #import traceback
-        #print traceback.print_exc()
         logging.error(str(e))
     except Exception, e:
+        if logging.getLogger().level == logging.DEBUG:
+            import traceback
+            traceback.print_exc()
         logging.error(str(e))
         sys.exit(1)
         

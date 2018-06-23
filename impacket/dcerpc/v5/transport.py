@@ -234,7 +234,7 @@ class DCERPCTransport:
                pass
 
     def doesSupportNTLMv2(self):
-        # By default we'll be returning the library's deafult. Only on SMB Transports we might be able to know it beforehand
+        # By default we'll be returning the library's default. Only on SMB Transports we might be able to know it beforehand
         return ntlm.USE_NTLMv2
 
     def get_dce_rpc(self):
@@ -401,6 +401,7 @@ class SMBTransport(DCERPCTransport):
         # that's up for the caller
         if self.__existing_smb is False:
             self.__smb_connection.logoff()
+            self.__smb_connection.close()
             self.__smb_connection = 0
 
     def send(self,data, forceWriteAndx = 0, forceRecv = 0):

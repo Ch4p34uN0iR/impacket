@@ -1,4 +1,4 @@
-# Copyright (c) 2003-2016 CORE Security Technologies
+# Copyright (c) 2003-2018 CORE Security Technologies
 #
 # This software is provided under a slightly modified version
 # of the Apache Software License. See the accompanying LICENSE file
@@ -201,11 +201,29 @@ class NL_RECORD(Structure):
         ('DomainNameLength','<H=0'),
         ('EffectiveNameLength','<H=0'),
         ('FullNameLength','<H=0'),
-        ('MetaData','52s=""'),
-        ('FullDomainLength','<H=0'),
-        ('Length2','<H=0'),
+# Taken from https://github.com/gentilkiwi/mimikatz/blob/master/mimikatz/modules/kuhl_m_lsadump.h#L265
+        ('LogonScriptName','<H=0'),
+        ('ProfilePathLength','<H=0'),
+        ('HomeDirectoryLength','<H=0'),
+        ('HomeDirectoryDriveLength','<H=0'),
+        ('UserId','<L=0'),
+        ('PrimaryGroupId','<L=0'),
+        ('GroupCount','<L=0'),
+        ('logonDomainNameLength','<H=0'),
+        ('unk0','<H=0'),
+        ('LastWrite','<Q=0'),
+        ('Revision','<L=0'),
+        ('SidCount','<L=0'),
+        ('Flags','<L=0'),
+        ('unk1','<L=0'),
+        ('LogonPackageLength','<L=0'),
+        ('DnsDomainNameLength','<H=0'),
+        ('UPN','<H=0'),
+       # ('MetaData','52s=""'),
+       # ('FullDomainLength','<H=0'),
+       # ('Length2','<H=0'),
+        ('IV','16s=""'),
         ('CH','16s=""'),
-        ('T','16s=""'),
         ('EncryptedData',':'),
     )
 
@@ -422,7 +440,7 @@ class RemoteOperations:
         request['pextClient']['cb'] = len(drs)
         request['pextClient']['rgb'] = list(str(drs))
         resp = self.__drsr.request(request)
-        if logging.getLogger().level == logging.DEBUG:
+        if LOG.level == logging.DEBUG:
             LOG.debug('DRSBind() answer')
             resp.dump()
 
@@ -437,7 +455,7 @@ class RemoteOperations:
 
         if drsExtensionsInt['dwReplEpoch'] != 0:
             # Different epoch, we have to call DRSBind again
-            if logging.getLogger().level == logging.DEBUG:
+            if LOG.level == logging.DEBUG:
                 LOG.debug("DC's dwReplEpoch != 0, setting it to %d and calling DRSBind again" % drsExtensionsInt[
                     'dwReplEpoch'])
             drs['dwReplEpoch'] = drsExtensionsInt['dwReplEpoch']
@@ -449,7 +467,7 @@ class RemoteOperations:
 
         # Now let's get the NtdsDsaObjectGuid UUID to use when querying NCChanges
         resp = drsuapi.hDRSDomainControllerInfo(self.__drsr, self.__hDrs, self.__domainName, 2)
-        if logging.getLogger().level == logging.DEBUG:
+        if LOG.level == logging.DEBUG:
             LOG.debug('DRSDomainControllerInfo() answer')
             resp.dump()
 
@@ -586,7 +604,9 @@ class RemoteOperations:
                 account = account[2:]
             return account
         except Exception, e:
-            LOG.error(e)
+            # Don't log if history service is not found, that should be normal
+            if serviceName.endswith("_history") is False:
+                LOG.error(e)
             return None
 
     def __checkServiceStatus(self):
@@ -1222,7 +1242,7 @@ class LSASecrets(OfflineRegistry):
         LSA_HASHED = 1
         LSA_RAW = 2
 
-    def __init__(self, securityFile, bootKey, remoteOps=None, isRemote=False,
+    def __init__(self, securityFile, bootKey, remoteOps=None, isRemote=False, history=False,
                  perSecretCallback=lambda secretType, secret: _print_helper(secret)):
         OfflineRegistry.__init__(self, securityFile, isRemote)
         self.__hashedBootKey = ''
@@ -1236,6 +1256,7 @@ class LSASecrets(OfflineRegistry):
         self.__cachedItems = []
         self.__secretItems = []
         self.__perSecretCallback = perSecretCallback
+        self.__history = history
 
     def MD5(self, data):
         md5 = hashlib.new('md5')
@@ -1345,7 +1366,7 @@ class LSASecrets(OfflineRegistry):
             # No cache entries
             return
         try:
-            # Remove unnecesary value
+            # Remove unnecessary value
             values.remove('NL$Control')
         except:
             pass
@@ -1356,19 +1377,26 @@ class LSASecrets(OfflineRegistry):
         for value in values:
             LOG.debug('Looking into %s' % value)
             record = NL_RECORD(self.getValue(ntpath.join('\\Cache',value))[1])
-            if record['CH'] != 16 * '\x00':
-                if self.__vistaStyle is True:
-                    plainText = self.__cryptoCommon.decryptAES(self.__NKLMKey[16:32], record['EncryptedData'], record['CH'])
+            if record['IV'] != 16 * '\x00':
+            #if record['UserLength'] > 0:
+                if record['Flags'] & 1 == 1:
+                    # Encrypted
+                    if self.__vistaStyle is True:
+                        plainText = self.__cryptoCommon.decryptAES(self.__NKLMKey[16:32], record['EncryptedData'], record['IV'])
+                    else:
+                        plainText = self.__decryptHash(self.__NKLMKey, record['EncryptedData'], record['IV'])
+                        pass
                 else:
-                    plainText = self.__decryptHash(self.__NKLMKey, record['EncryptedData'], record['CH'])
-                    pass
+                    # Plain! Until we figure out what this is, we skip it
+                    #plainText = record['EncryptedData']
+                    continue
                 encHash = plainText[:0x10]
                 plainText = plainText[0x48:]
                 userName = plainText[:record['UserLength']].decode('utf-16le')
                 plainText = plainText[self.__pad(record['UserLength']):]
                 domain = plainText[:record['DomainNameLength']].decode('utf-16le')
                 plainText = plainText[self.__pad(record['DomainNameLength']):]
-                domainLong = plainText[:self.__pad(record['FullDomainLength'])].decode('utf-16le')
+                domainLong = plainText[:self.__pad(record['DnsDomainNameLength'])].decode('utf-16le')
                 answer = "%s:%s:%s:%s:::" % (userName, hexlify(encHash), domainLong, domain)
                 self.__cachedItems.append(answer)
                 self.__perSecretCallback(LSASecrets.SECRET_TYPE.LSA_HASHED, answer)
@@ -1475,7 +1503,7 @@ class LSASecrets(OfflineRegistry):
             # No entries
             return
         try:
-            # Remove unnecesary value
+            # Remove unnecessary value
             keys.remove('NL$Control')
         except:
             pass
@@ -1485,19 +1513,28 @@ class LSASecrets(OfflineRegistry):
 
         for key in keys:
             LOG.debug('Looking into %s' % key)
-            value = self.getValue('\\Policy\\Secrets\\%s\\CurrVal\\default' % key)
+            valueTypeList = ['CurrVal']
+            # Check if old LSA secrets values are also need to be shown
+            if self.__history:
+                valueTypeList.append('OldVal')
 
-            if value is not None:
-                if self.__vistaStyle is True:
-                    record = LSA_SECRET(value[1])
-                    tmpKey = self.__sha256(self.__LSAKey, record['EncryptedData'][:32])
-                    plainText = self.__cryptoCommon.decryptAES(tmpKey, record['EncryptedData'][32:])
-                    record = LSA_SECRET_BLOB(plainText)
-                    secret = record['Secret']
-                else:
-                    secret = self.__decryptSecret(self.__LSAKey, value[1])
+            for valueType in valueTypeList:
+                value = self.getValue('\\Policy\\Secrets\\{}\\{}\\default'.format(key,valueType))
+                if value is not None and value[1] != 0:
+                    if self.__vistaStyle is True:
+                        record = LSA_SECRET(value[1])
+                        tmpKey = self.__sha256(self.__LSAKey, record['EncryptedData'][:32])
+                        plainText = self.__cryptoCommon.decryptAES(tmpKey, record['EncryptedData'][32:])
+                        record = LSA_SECRET_BLOB(plainText)
+                        secret = record['Secret']
+                    else:
+                        secret = self.__decryptSecret(self.__LSAKey, value[1])
 
-                self.__printSecret(key, secret)
+                    # If this is an OldVal secret, let's append '_history' to be able to distinguish it and
+                    # also be consistent with NTDS history
+                    if valueType == 'OldVal':
+                        key += '_history'
+                    self.__printSecret(key, secret)
 
     def exportSecrets(self, fileName):
         if len(self.__secretItems) > 0:
@@ -2198,9 +2235,9 @@ class NTDSHashes:
                             if self.__justNTLM is False:
                                 self.__decryptSupplementalInfo(record, None, keysOutputFile, clearTextOutputFile)
                         except Exception, e:
-                            if logging.getLogger().level == logging.DEBUG:
+                            if LOG.level == logging.DEBUG:
                                 import traceback
-                                print traceback.print_exc()
+                                traceback.print_exc()
                             try:
                                 LOG.error(
                                     "Error while processing row for user %s" % record[self.NAME_TO_INTERNAL['name']])
@@ -2227,9 +2264,9 @@ class NTDSHashes:
                                 if self.__justNTLM is False:
                                     self.__decryptSupplementalInfo(record, None, keysOutputFile, clearTextOutputFile)
                         except Exception, e:
-                            if logging.getLogger().level == logging.DEBUG:
+                            if LOG.level == logging.DEBUG:
                                 import traceback
-                                print traceback.print_exc()
+                                traceback.print_exc()
                             try:
                                 LOG.error(
                                     "Error while processing row for user %s" % record[self.NAME_TO_INTERNAL['name']])
@@ -2346,9 +2383,9 @@ class NTDSHashes:
                                         'pPrefixEntry'], keysOutputFile, clearTextOutputFile)
 
                             except Exception, e:
-                                if logging.getLogger().level == logging.DEBUG:
+                                if LOG.level == logging.DEBUG:
                                     import traceback
-                                    print traceback.print_exc()
+                                    traceback.print_exc()
                                 LOG.error("Error while processing user!")
                                 LOG.error(str(e))
 

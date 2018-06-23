@@ -79,6 +79,7 @@ from impacket.krb5.crypto import Key, _enctype_table, _checksum_table, Enctype
 from impacket.dcerpc.v5.ndr import NDRULONG
 from impacket.dcerpc.v5.samr import NULL, GROUP_MEMBERSHIP, SE_GROUP_MANDATORY, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_ENABLED
 from pyasn1.codec.der import decoder, encoder
+from pyasn1.type.univ import noValue
 from impacket.examples import logger
 from impacket.ntlm import LMOWFv1, NTOWFv1
 from impacket.dcerpc.v5.dtypes import RPC_SID, MAXIMUM_ALLOWED
@@ -222,7 +223,8 @@ class PSEXEC:
 
         except SystemExit:
             raise
-        except:
+        except Exception as e:
+            logging.debug(str(e))
             if unInstalled is False:
                 installService.uninstall()
                 if self.__copyFile is not None:
@@ -243,8 +245,7 @@ class PSEXEC:
                 pass
 
         if tries == 0:
-            logging.critical('Pipe not ready, aborting')
-            raise
+            raise Exception('Pipe not ready, aborting')
 
         fid = s.openFile(tid,pipe,accessMask, creationOption = 0x40, fileAttributes = 0x80)
 
@@ -825,8 +826,9 @@ class RAISECHILD:
             rid, lmhash, nthash = self.__decryptHash(userRecord, userRecord['pmsgOut']['V6']['PrefixTableSrc']['pPrefixEntry'])
             aesKey = self.__decryptSupplementalInfo(userRecord, userRecord['pmsgOut']['V6']['PrefixTableSrc']['pPrefixEntry'])
         except Exception, e:
-            #import traceback
-            #traceback.print_exc()
+            if logging.getLogger().level == logging.DEBUG:
+                import traceback
+                traceback.print_exc()
             logging.error("Error while processing user!")
             logging.error(str(e))
             raise
@@ -1038,7 +1040,7 @@ class RAISECHILD:
         pacType['Buffers'] = buffers + buffersTail
 
         authorizationData = AuthorizationData()
-        authorizationData[0] = None
+        authorizationData[0] = noValue
         authorizationData[0]['ad-type'] = int(constants.AuthorizationDataType.AD_WIN2K_PAC.value)
         authorizationData[0]['ad-data'] = str(pacType)
         authorizationData = encoder.encode(authorizationData)
@@ -1213,7 +1215,7 @@ if __name__ == '__main__':
     parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON')
     parser.add_argument('-w', action='store',metavar = "pathname",  help='writes the golden ticket in CCache format '
                                                                          'into the <pathname> file')
-    #parser.add_argument('-dc-ip', action='store',metavar = "ip address",  help='IP Address of the domain controller (needed to get the user''s SID). If ommited it use the domain part (FQDN) specified in the target parameter')
+    #parser.add_argument('-dc-ip', action='store',metavar = "ip address",  help='IP Address of the domain controller (needed to get the user''s SID). If omitted it will use the domain part (FQDN) specified in the target parameter')
     parser.add_argument('-target-exec', action='store',metavar = "target address",  help='Target host you want to PSEXEC '
                         'against once the main attack finished')
 
@@ -1282,6 +1284,7 @@ if __name__ == '__main__':
         if e.getErrorCode() == STATUS_NO_LOGON_SERVERS:
             logging.info('Try using Kerberos authentication (-k switch). That might help solving the STATUS_NO_LOGON_SERVERS issue')
     except Exception, e:
-        #import traceback
-        #print traceback.print_exc()
+        if logging.getLogger().level == logging.DEBUG:
+            import traceback
+            traceback.print_exc()
         logging.critical(str(e))

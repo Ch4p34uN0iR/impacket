@@ -72,6 +72,7 @@ class DumpSecrets:
         self.__NTDSHashes = None
         self.__LSASecrets = None
         self.__systemHive = options.system
+        self.__bootkey = options.bootkey
         self.__securityHive = options.security
         self.__samHive = options.sam
         self.__ntdsFile = options.ntds
@@ -106,23 +107,28 @@ class DumpSecrets:
             if self.__remoteName.upper() == 'LOCAL' and self.__username == '':
                 self.__isRemote = False
                 self.__useVSSMethod = True
-                localOperations = LocalOperations(self.__systemHive)
-                bootKey = localOperations.getBootKey()
-                if self.__ntdsFile is not None:
+                if self.__systemHive:
+                    localOperations = LocalOperations(self.__systemHive)
+                    bootKey = localOperations.getBootKey()
+                    if self.__ntdsFile is not None:
                     # Let's grab target's configuration about LM Hashes storage
-                    self.__noLMHash = localOperations.checkNoLMHashPolicy()
+                        self.__noLMHash = localOperations.checkNoLMHashPolicy()
+                else:
+                    import binascii
+                    bootKey = binascii.unhexlify(self.__bootkey)
+
             else:
                 self.__isRemote = True
                 bootKey = None
                 try:
                     try:
                         self.connect()
-                    except:
+                    except Exception, e:
                         if os.getenv('KRB5CCNAME') is not None and self.__doKerberos is True:
                             # SMBConnection failed. That might be because there was no way to log into the
                             # target system. We just have a last resort. Hope we have tickets cached and that they
                             # will work
-                            logging.debug('SMBConnection didn\'t work, hoping Kerberos will help')
+                            logging.debug('SMBConnection didn\'t work, hoping Kerberos will help (%s)' % str(e))
                             pass
                         else:
                             raise
@@ -165,7 +171,8 @@ class DumpSecrets:
                     else:
                         SECURITYFileName = self.__securityHive
 
-                    self.__LSASecrets = LSASecrets(SECURITYFileName, bootKey, self.__remoteOps, isRemote=self.__isRemote)
+                    self.__LSASecrets = LSASecrets(SECURITYFileName, bootKey, self.__remoteOps,
+                                                   isRemote=self.__isRemote, history=self.__history)
                     self.__LSASecrets.dumpCachedHashes()
                     if self.__outputFileName is not None:
                         self.__LSASecrets.exportCached(self.__outputFileName)
@@ -173,6 +180,9 @@ class DumpSecrets:
                     if self.__outputFileName is not None:
                         self.__LSASecrets.exportSecrets(self.__outputFileName)
                 except Exception, e:
+                    if logging.getLogger().level == logging.DEBUG:
+                        import traceback
+                        traceback.print_exc()
                     logging.error('LSA hashes extraction failed: %s' % str(e))
 
             # NTDS Extraction we can try regardless of RemoteOperations failing. It might still work
@@ -195,7 +205,7 @@ class DumpSecrets:
             except Exception, e:
                 if logging.getLogger().level == logging.DEBUG:
                     import traceback
-                    print traceback.print_exc()
+                    traceback.print_exc()
                 if str(e).find('ERROR_DS_DRA_BAD_DN') >= 0:
                     # We don't store the resume file if this error happened, since this error is related to lack
                     # of enough privileges to access DRSUAPI.
@@ -213,7 +223,7 @@ class DumpSecrets:
         except (Exception, KeyboardInterrupt), e:
             if logging.getLogger().level == logging.DEBUG:
                 import traceback
-                print traceback.print_exc()
+                traceback.print_exc()
             logging.error(e)
             if self.__NTDSHashes is not None:
                 if isinstance(e, KeyboardInterrupt):
@@ -267,6 +277,7 @@ if __name__ == '__main__':
                                                        ' (if you want to parse local files)')
     parser.add_argument('-debug', action='store_true', help='Turn DEBUG output ON')
     parser.add_argument('-system', action='store', help='SYSTEM hive to parse')
+    parser.add_argument('-bootkey', action='store', help='bootkey for SYSTEM hive')
     parser.add_argument('-security', action='store', help='SECURITY hive to parse')
     parser.add_argument('-sam', action='store', help='SAM hive to parse')
     parser.add_argument('-ntds', action='store', help='NTDS.DIT file to parse')
@@ -291,7 +302,7 @@ if __name__ == '__main__':
                        help='Shows pwdLastSet attribute for each NTDS.DIT account. Doesn\'t apply to -outputfile data')
     group.add_argument('-user-status', action='store_true', default=False,
                         help='Display whether or not the user is disabled')
-    group.add_argument('-history', action='store_true', help='Dump password history')
+    group.add_argument('-history', action='store_true', help='Dump password history, and LSA secrets OldVal')
     group = parser.add_argument_group('authentication')
 
     group.add_argument('-hashes', action="store", metavar = "LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH')
@@ -305,7 +316,7 @@ if __name__ == '__main__':
     group.add_argument('-dc-ip', action='store',metavar = "ip address",  help='IP Address of the domain controller. If '
                                  'ommited it use the domain part (FQDN) specified in the target parameter')
     group.add_argument('-target-ip', action='store', metavar="ip address",
-                       help='IP Address of the target machine. If ommited it will use whatever was specified as target. '
+                       help='IP Address of the target machine. If omitted it will use whatever was specified as target. '
                             'This is useful when target is the NetBIOS name and you cannot resolve it')
 
     if len(sys.argv)==1:
@@ -352,8 +363,8 @@ if __name__ == '__main__':
         sys.exit(1)
 
     if remoteName.upper() == 'LOCAL' and username == '':
-        if options.system is None:
-            logging.error('SYSTEM hive is always required for local parsing, check help')
+        if options.system is None and options.bootkey is None:
+            logging.error('Either the SYSTEM hive or bootkey is required for local parsing, check help')
             sys.exit(1)
     else:
 
@@ -377,5 +388,5 @@ if __name__ == '__main__':
     except Exception, e:
         if logging.getLogger().level == logging.DEBUG:
             import traceback
-            print traceback.print_exc()
+            traceback.print_exc()
         logging.error(e)
